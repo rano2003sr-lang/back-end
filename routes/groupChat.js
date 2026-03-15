@@ -3,6 +3,7 @@ const { auth } = require("../authGoogle/googleAuth");
 const User = require("../module/Users");
 const GroupChatMessage = require("../module/GroupChatMessage");
 const Wallet = require("../module/Wallet");
+const { sendPushNotification } = require("../utils/push");
 
 const router = express.Router();
 
@@ -215,6 +216,26 @@ router.post("/group-chat/send", auth, async (req, res) => {
     if (all.length > MAX) {
       const toDel = all.slice(0, all.length - MAX).map((m) => m._id);
       await GroupChatMessage.deleteMany({ _id: { $in: toDel } });
+    }
+
+    // إرسال إشعار push لجميع المستخدمين في الغرفة (ما عدا المرسل)
+    const notifyUserIds = Array.from(roomUsers.keys()).filter((id) => id !== fromId);
+    if (notifyUserIds.length > 0) {
+      const recipients = await User.find({ userId: { $in: notifyUserIds }, pushToken: { $exists: true, $ne: "" } }).select("userId pushToken").lean();
+      let notifBody = String(finalText || "").slice(0, 80);
+      if (audioUrl) notifBody = "🎤 رسالة صوتية";
+      else if (imageUrl) notifBody = "📷 صورة";
+      else if (/^GIFT:/.test(finalText || "")) notifBody = "🎁 هدية";
+      const notifTitle = `${fromUser.name || "مستخدم"} في الدردشة الجماعية`;
+      for (const r of recipients) {
+        if (r.pushToken) {
+          sendPushNotification(r.pushToken, notifTitle, notifBody || "رسالة جديدة", null, {
+            type: "groupMessage",
+            fromId,
+            fromName: fromUser.name || "",
+          }).catch((e) => console.error("[groupChat] push error:", e?.message));
+        }
+      }
     }
 
     let fromWallet = await Wallet.findOne({ userId: fromId }).select("diamonds chargedGold").lean();

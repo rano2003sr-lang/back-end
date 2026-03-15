@@ -1,12 +1,17 @@
 const axios = require("axios");
 
 async function sendPushNotification(pushToken, title, body, imageUrl, data = {}) {
-  if (!pushToken || !pushToken.startsWith("ExponentPushToken")) return;
+  if (!pushToken || typeof pushToken !== "string") return;
+  const token = String(pushToken).trim();
+  if (!token.startsWith("ExponentPushToken")) {
+    console.warn("[push] توكن غير صالح (يجب أن يبدأ بـ ExponentPushToken):", token ? token.slice(0, 30) + "..." : "فارغ");
+    return;
+  }
   try {
     const img = imageUrl && String(imageUrl).trim();
     const finalImg = img && img.startsWith("http") ? img : null;
     const payload = {
-      to: pushToken,
+      to: token,
       title: title || "رسالة جديدة",
       body: body || "لديك رسالة جديدة",
       sound: "default",
@@ -17,13 +22,17 @@ async function sendPushNotification(pushToken, title, body, imageUrl, data = {})
     if (finalImg) {
       payload.richContent = { image: finalImg };
     }
-    await axios.post(
+    const res = await axios.post(
       "https://exp.host/--/api/v2/push/send",
       [payload],
       { headers: { "Content-Type": "application/json" }, timeout: 10000 }
     );
+    const ticket = res?.data?.data?.[0];
+    if (ticket?.status === "error") {
+      console.warn("[push] فشل إرسال الإشعار:", ticket.message || ticket);
+    }
   } catch (err) {
-    // تجاهل
+    console.error("[push] خطأ في إرسال الإشعار:", err?.response?.data || err?.message || err);
   }
 }
 

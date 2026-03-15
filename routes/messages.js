@@ -210,7 +210,9 @@ router.post("/send", auth, async (req, res) => {
         fromId,
         fromName: fromUser.name || "",
         fromProfileImage: fromUser.profileImage || "",
-      }).catch(() => {});
+      }).catch((e) => console.error("[messages] push error:", e?.message));
+    } else {
+      console.warn("[messages] المستلم لا يملك pushToken:", toUserId);
     }
 
     res.json({
