@@ -4,8 +4,11 @@ const User = require("../module/Users");
 const GroupChatMessage = require("../module/GroupChatMessage");
 const Wallet = require("../module/Wallet");
 const { sendPushNotification } = require("../utils/push");
+const { AccessToken } = require("livekit-server-sdk");
 
 const router = express.Router();
+
+const LIVEKIT_ROOM = "rolet-group-chat";
 
 // غرفة الدردشة الجماعية — تخزين مؤقت في الذاكرة
 // كل مستخدم: { userId, name, gender, profileImage, joinedAt, lastSeen }
@@ -62,6 +65,29 @@ router.post("/group-chat/join", auth, async (req, res) => {
   }
 });
 
+/** توكن LiveKit للصوت المباشر — LiveKit أرخص/مجاني عند الاستضافة الذاتية */
+router.get("/group-chat/voice-token", auth, async (req, res) => {
+  try {
+    const apiKey = process.env.LIVEKIT_API_KEY;
+    const apiSecret = process.env.LIVEKIT_API_SECRET;
+    const wsUrl = process.env.LIVEKIT_WS_URL;
+    if (!apiKey || !apiSecret || !wsUrl) {
+      return res.status(503).json({ success: false, message: "LiveKit غير مُعد" });
+    }
+    const meId = req.user.id;
+    const me = await User.findOne({ userId: meId }).select("name");
+    const identity = meId;
+    const name = me?.name || "مستخدم";
+    const at = new AccessToken(apiKey, apiSecret, { identity, name, ttl: "2h" });
+    at.addGrant({ roomJoin: true, room: LIVEKIT_ROOM, canPublish: true, canSubscribe: true });
+    const token = await at.toJwt();
+    res.json({ success: true, token, wsUrl });
+  } catch (err) {
+    console.error("voice-token error:", err);
+    res.status(500).json({ success: false });
+  }
+});
+
 /** مغادرة غرفة الدردشة */
 router.post("/group-chat/leave", auth, async (req, res) => {
   try {
@@ -86,7 +112,7 @@ router.post("/group-chat/slot", auth, async (req, res) => {
       for (const [idx, data] of roomSlots.entries()) {
         if (data.userId === meId) roomSlots.delete(idx);
       }
-      return res.json({ success: true, slots: getSlotsArray() });
+      return res.json({ success: true, slots: await getSlotsWithWallet() });
     }
     const idx = parseInt(slotIndex, 10);
     if (!Number.isFinite(idx) || idx < 1 || idx > 8) {
@@ -102,7 +128,7 @@ router.post("/group-chat/slot", auth, async (req, res) => {
       name: me.name || "مستخدم",
       profileImage: me.profileImage || null,
     });
-    res.json({ success: true, slots: getSlotsArray() });
+    res.json({ success: true, slots: await getSlotsWithWallet() });
   } catch (err) {
     console.error("group-chat slot error:", err);
     res.status(500).json({ success: false });
@@ -118,12 +144,31 @@ function getSlotsArray() {
   return arr;
 }
 
-/** جلب الشقق الحالية */
+async function getSlotsWithWallet() {
+  const slots = getSlotsArray();
+  const userIds = slots.filter(Boolean).map((s) => s.userId);
+  const wallets = userIds.length
+    ? await Wallet.find({ userId: { $in: userIds } }).select("userId totalGold chargedGold freeGold diamonds").lean()
+    : [];
+  const walletMap = Object.fromEntries(wallets.map((w) => [w.userId, w]));
+  return slots.map((s) => {
+    if (!s) return null;
+    const w = walletMap[s.userId] || {};
+    const totalGold = (w.chargedGold ?? 0) + (w.freeGold ?? 0);
+    const diamonds = w.diamonds ?? 0;
+    const chargedGold = w.chargedGold ?? 0;
+    const level = Math.floor(diamonds / 10) + 1;
+    return { ...s, totalGold, diamonds, chargedGold, level };
+  });
+}
+
+/** جلب الشقق الحالية — مع ثروة وسحر وليفل */
 router.get("/group-chat/slots", auth, async (req, res) => {
   try {
     touchUser(req.user.id);
     cleanupStale();
-    res.json({ success: true, slots: getSlotsArray() });
+    const slots = await getSlotsWithWallet();
+    res.json({ success: true, slots });
   } catch (err) {
     res.status(500).json({ success: false });
   }
