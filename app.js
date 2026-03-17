@@ -13,6 +13,11 @@ dns.setServers(["8.8.8.8", "8.8.4.4", "1.1.1.1"]);
 app.set("trust proxy", true);
 
 // Middleware
+try {
+  app.use(require("compression")());
+} catch {
+  // compression غير مُثبت — شغّل: npm install compression
+}
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cors({

@@ -6,6 +6,10 @@ const { auth } = require("../authGoogle/googleAuth");
 const User = require("../module/Users");
 const GroupChatMessage = require("../module/GroupChatMessage");
 const Wallet = require("../module/Wallet");
+
+// تخزين مؤقت للرسائل — يقلل الضغط على MongoDB عند الاستعلام المتكرر
+const messagesCache = { data: null, ts: 0 };
+const MESSAGES_CACHE_MS = 1500;
 const { sendPushNotification, getBaseUrl } = require("../utils/push");
 const { AccessToken } = require("livekit-server-sdk");
 
@@ -320,6 +324,8 @@ router.post("/group-chat/send", auth, async (req, res) => {
 
     let fromWallet = await Wallet.findOne({ userId: fromId }).select("diamonds chargedGold").lean();
     if (!fromWallet) fromWallet = { diamonds: 0, chargedGold: 0 };
+    messagesCache.data = null;
+    messagesCache.ts = 0;
     res.json({
       success: true,
       message: {
@@ -345,42 +351,37 @@ router.post("/group-chat/send", auth, async (req, res) => {
   }
 });
 
-/** جلب رسائل الدردشة الجماعية — مع بيانات المرسل (عمر، جنس، ماس، مشحون) */
+/** جلب رسائل الدردشة الجماعية — مع cache لتخفيف الضغط */
 router.get("/group-chat/messages", auth, async (req, res) => {
   try {
+    const now = Date.now();
+    if (messagesCache.data && now - messagesCache.ts < MESSAGES_CACHE_MS) {
+      return res.json(messagesCache.data);
+    }
     const limit = Math.min(parseInt(req.query.limit, 10) || 250, 250);
     const msgs = await GroupChatMessage.find({ roomId: "main" })
+      .select("fromId fromName fromProfileImage toId text createdAt audioUrl audioDurationSeconds imageUrl")
       .sort({ createdAt: -1 })
       .limit(limit)
       .lean();
-    const fromIds = [...new Set(msgs.map((m) => m.fromId))];
-    const users = await User.find({ userId: { $in: fromIds } }).select("userId age gender").lean();
-    const wallets = await Wallet.find({ userId: { $in: fromIds } }).select("userId diamonds chargedGold").lean();
-    const userMap = Object.fromEntries(users.map((u) => [u.userId, u]));
-    const walletMap = Object.fromEntries(wallets.map((w) => [w.userId, w]));
-    res.json({
+    const payload = {
       success: true,
-      messages: msgs.reverse().map((m) => {
-        const u = userMap[m.fromId] || {};
-        const w = walletMap[m.fromId] || {};
-        return {
-          id: String(m._id),
-          fromId: m.fromId,
-          fromName: m.fromName,
-          fromProfileImage: m.fromProfileImage,
-          fromAge: u.age ?? null,
-          fromGender: u.gender || null,
-          fromDiamonds: w.diamonds ?? 0,
-          fromChargedGold: w.chargedGold ?? 0,
-          toId: m.toId,
-          text: m.text,
-          createdAt: m.createdAt,
-          audioUrl: m.audioUrl,
-          audioDurationSeconds: m.audioDurationSeconds,
-          imageUrl: m.imageUrl,
-        };
-      }),
-    });
+      messages: msgs.reverse().map((m) => ({
+        id: String(m._id),
+        fromId: m.fromId,
+        fromName: m.fromName,
+        fromProfileImage: m.fromProfileImage,
+        toId: m.toId,
+        text: m.text,
+        createdAt: m.createdAt,
+        audioUrl: m.audioUrl,
+        audioDurationSeconds: m.audioDurationSeconds,
+        imageUrl: m.imageUrl,
+      })),
+    };
+    messagesCache.data = payload;
+    messagesCache.ts = now;
+    res.json(payload);
   } catch (err) {
     console.error("group-chat messages error:", err);
     res.status(500).json({ success: false });
