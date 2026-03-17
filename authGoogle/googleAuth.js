@@ -98,6 +98,15 @@ router.post("/auth/request-pin", async (req, res) => {
       if (!user) return res.status(404).json({ success: false, message: "البريد غير مسجل. قم بالتسجيل أولاً" });
     } else if (mode === "signup") {
       if (user) return res.status(409).json({ success: false, message: "البريد مسجّل مسبقاً. سجّل دخولك" });
+      if (!user) {
+        user = await User.create({
+          userId: generateUserId(),
+          name: trimmedEmail.split("@")[0] || "مستخدم جديد",
+          email: trimmedEmail,
+          password: generateRandomPassword(),
+          profileImage: "",
+        });
+      }
     } else {
       if (!user) {
         user = await User.create({
