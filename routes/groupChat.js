@@ -323,7 +323,7 @@ router.post("/group-chat/send", auth, async (req, res) => {
     res.json({
       success: true,
       message: {
-        id: msg._id,
+        id: String(msg._id),
         fromId: msg.fromId,
         fromName: msg.fromName,
         fromProfileImage: msg.fromProfileImage,
@@ -364,7 +364,7 @@ router.get("/group-chat/messages", auth, async (req, res) => {
         const u = userMap[m.fromId] || {};
         const w = walletMap[m.fromId] || {};
         return {
-          id: m._id,
+          id: String(m._id),
           fromId: m.fromId,
           fromName: m.fromName,
           fromProfileImage: m.fromProfileImage,
