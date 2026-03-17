@@ -176,9 +176,9 @@ router.post("/group-chat/upload-music", auth, musicUpload.single("music"), async
   }
 });
 
-// تخزين مؤقت — استجابة فورية عند الطلبات المتكررة (كل 1.5 ثانية)
+// تخزين مؤقت — استجابة فورية عند الطلبات المتكررة
 let messagesCache = { data: [], ts: 0 };
-const CACHE_TTL_MS = 2000;
+const CACHE_TTL_MS = 1500;
 
 // GET /api/group-chat/messages — جلب رسائل الدردشة الجماعية
 router.get("/group-chat/messages", auth, async (req, res) => {
@@ -187,7 +187,7 @@ router.get("/group-chat/messages", auth, async (req, res) => {
     return res.json({ success: true, messages: messagesCache.data });
   }
   try {
-    const limit = Math.min(parseInt(req.query.limit, 10) || 250, 500);
+    const limit = 250;
     const msgs = await GroupChatMessage.find({})
       .sort({ createdAt: 1 })
       .limit(limit)
@@ -285,12 +285,15 @@ router.post("/group-chat/send", auth, async (req, res) => {
       imageUrl: imageUrl || null,
     });
 
-    const MAX_MESSAGES = 1000;
+    const MAX_MESSAGES = 250;
     const count = await GroupChatMessage.countDocuments();
     if (count > MAX_MESSAGES) {
-      const oldest = await GroupChatMessage.find().sort({ createdAt: 1 }).limit(count - MAX_MESSAGES).select("_id").lean();
-      await GroupChatMessage.deleteMany({ _id: { $in: oldest.map((o) => o._id) } });
+      const excess = count - MAX_MESSAGES;
+      const oldest = await GroupChatMessage.find().sort({ createdAt: 1 }).limit(excess).select("_id").lean();
+      if (oldest.length) await GroupChatMessage.deleteMany({ _id: { $in: oldest.map((o) => o._id) } });
     }
+
+    messagesCache = { data: [], ts: 0 };
 
     res.json({
       success: true,
