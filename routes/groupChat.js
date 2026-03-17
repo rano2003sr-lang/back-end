@@ -194,13 +194,18 @@ router.get("/group-chat/messages", auth, async (req, res) => {
       .lean();
 
     const fromIds = [...new Set(msgs.map((m) => m.fromId))];
-    const users = fromIds.length
-      ? await User.find({ userId: { $in: fromIds } }).select("userId name profileImage age gender").lean()
-      : [];
+    const [users, wallets] = await Promise.all([
+      fromIds.length ? User.find({ userId: { $in: fromIds } }).select("userId name profileImage age gender").lean() : [],
+      fromIds.length ? Wallet.find({ userId: { $in: fromIds } }).select("userId diamonds chargedGold").lean() : [],
+    ]);
     const userMap = new Map(users.map((u) => [u.userId, u]));
+    const walletMap = new Map(wallets.map((w) => [w.userId, w]));
 
     const result = msgs.map((m) => {
       const u = userMap.get(m.fromId);
+      const w = walletMap.get(m.fromId);
+      const diamonds = m.fromDiamonds ?? w?.diamonds ?? 0;
+      const chargedGold = m.fromChargedGold ?? w?.chargedGold ?? 0;
       return {
         id: m._id,
         fromId: m.fromId,
@@ -208,8 +213,8 @@ router.get("/group-chat/messages", auth, async (req, res) => {
         fromProfileImage: m.fromProfileImage ?? u?.profileImage ?? null,
         fromAge: m.fromAge ?? u?.age ?? null,
         fromGender: m.fromGender ?? u?.gender ?? null,
-        fromDiamonds: m.fromDiamonds ?? null,
-        fromChargedGold: m.fromChargedGold ?? null,
+        fromDiamonds: diamonds,
+        fromChargedGold: chargedGold,
         toId: m.toId ?? null,
         text: m.text,
         createdAt: m.createdAt,
