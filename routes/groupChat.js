@@ -263,7 +263,11 @@ router.get("/group-chat/messages", auth, async (req, res) => {
     messagesCache.ts = now;
     res.json(payload);
   } catch (err) {
-    console.error("group-chat messages error:", err);
+    // عند فشل MongoDB: إرجاع آخر cache إن وُجد (لتجنب شاشة فارغة)
+    if (messagesCache.data) {
+      return res.json(messagesCache.data);
+    }
+    console.error("group-chat messages error:", err?.message || err);
     res.status(500).json({ success: false });
   }
 });
