@@ -8,6 +8,11 @@ const RevenueShare = require("../module/RevenueShare");
 const { auth } = require("../authGoogle/googleAuth");
 
 const router = express.Router();
+const walletCache = new Map();
+const WALLET_CACHE_TTL = 1500;
+function invalidateWalletCache(userId) {
+  walletCache.delete(userId);
+}
 const AD_REWARD_GOLD = 1;
 const AD_DAILY_LIMIT = 20; // 20 إعلان يومياً — 1 ذهب لكل إعلان
 const AD_WEEKLY_LIMIT = 140; // 20 يومياً × 7 — تراكم حتى 10$
@@ -20,6 +25,10 @@ const WAIT_BEFORE_CLAIM = TIMER_OFF ? 0 : MS_PER_DAY;
 router.get("/wallet", auth, async (req, res) => {
   try {
     const userId = req.user.id;
+    const cached = walletCache.get(userId);
+    if (cached && Date.now() - cached.ts < WALLET_CACHE_TTL) {
+      return res.json(cached.data);
+    }
     let wallet = await Wallet.findOne({ userId });
     if (!wallet) {
       wallet = await Wallet.create({
@@ -33,7 +42,7 @@ router.get("/wallet", auth, async (req, res) => {
     }
     const charged = wallet.chargedGold ?? 0;
     const free = wallet.freeGold ?? 0;
-    res.json({
+    const payload = {
       success: true,
       wallet: {
         totalGold: charged + free,
@@ -41,7 +50,9 @@ router.get("/wallet", auth, async (req, res) => {
         freeGold: free,
         diamonds: wallet.diamonds ?? 0,
       },
-    });
+    };
+    walletCache.set(userId, { data: payload, ts: Date.now() });
+    res.json(payload);
   } catch (err) {
     console.error("GET /wallet error:", err);
     res.status(500).json({ success: false, message: "خطأ في جلب الرصيد" });
@@ -78,6 +89,8 @@ router.post("/wallet/topup", auth, async (req, res) => {
     wallet.totalGold = newCharged + newFree;
     wallet.transactions.push({ amount, bonus: bonusAmount, createdAt: new Date() });
     await wallet.save();
+
+    invalidateWalletCache(userId);
 
     res.json({
       success: true,
@@ -270,6 +283,8 @@ router.post("/wallet/checkin", auth, async (req, res) => {
       wallet.transactions.push({ amount: 0, bonus: reward, createdAt: now });
       await wallet.save();
 
+      invalidateWalletCache(userId);
+
       const nextDay = checkin.currentDay >= 7 ? 1 : checkin.currentDay + 1;
       const newWeekStart = checkin.currentDay >= 7 ? now : checkin.weekStartAt;
       checkin.currentDay = nextDay;
@@ -434,6 +449,8 @@ router.post("/wallet/ad-reward", auth, async (req, res) => {
     wallet.transactions.push({ amount: 0, bonus: AD_REWARD_GOLD, createdAt: new Date() });
     await wallet.save();
 
+    invalidateWalletCache(userId);
+
     adDoc.count += 1;
     await adDoc.save();
 
@@ -572,6 +589,8 @@ router.post("/wallet/claim-task-five-messages", auth, async (req, res) => {
     wallet.transactions.push({ amount: 0, bonus: FIVE_MESSAGES_REWARD, createdAt: now });
     await wallet.save();
 
+    invalidateWalletCache(userId);
+
     const nextClaimAt = new Date(now.getTime() + FIVE_MESSAGES_COOLDOWN_MS);
     return res.json({
       success: true,
@@ -650,6 +669,8 @@ router.post("/wallet/claim-task-share-moment", auth, async (req, res) => {
     wallet.transactions.push({ amount: 0, bonus: SHARE_MOMENT_REWARD, createdAt: now });
     await wallet.save();
 
+    invalidateWalletCache(userId);
+
     const nextClaimAt = new Date(now.getTime() + SHARE_MOMENT_COOLDOWN_MS);
     return res.json({
       success: true,
@@ -726,6 +747,8 @@ router.post("/wallet/claim-task-add-friend", auth, async (req, res) => {
     wallet.lastAddFriendClaim = now;
     wallet.transactions.push({ amount: 0, bonus: ADD_FRIEND_REWARD, createdAt: now });
     await wallet.save();
+
+    invalidateWalletCache(userId);
 
     const nextClaimAt = new Date(now.getTime() + ADD_FRIEND_COOLDOWN_MS);
     return res.json({
@@ -843,6 +866,8 @@ router.post("/wallet/claim-task-dice", auth, async (req, res) => {
     wallet.lastDiceClaim = now;
     wallet.transactions.push({ amount: 0, bonus: DICE_REWARD, createdAt: now });
     await wallet.save();
+
+    invalidateWalletCache(userId);
 
     const nextClaimAt = new Date(now.getTime() + DICE_COOLDOWN_MS);
     return res.json({

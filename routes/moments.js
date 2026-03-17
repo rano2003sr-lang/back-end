@@ -36,8 +36,14 @@ const uploadFields = upload.fields([
   { name: "thumbnail", maxCount: 1 },
 ]);
 
+let momentsCache = { data: null, ts: 0 };
+const MOMENTS_CACHE_TTL = 2000;
+
 // GET /api/moments — جلب كل اللحظات
 router.get("/moments", async (req, res) => {
+  if (momentsCache.data && Date.now() - momentsCache.ts < MOMENTS_CACHE_TTL) {
+    return res.json(momentsCache.data);
+  }
   try {
     const currentUserId = req.headers.authorization ? (() => {
       try {
@@ -74,7 +80,9 @@ router.get("/moments", async (req, res) => {
       };
     });
 
-    res.json({ success: true, moments: list });
+    const payload = { success: true, moments: list };
+    momentsCache = { data: payload, ts: Date.now() };
+    res.json(payload);
   } catch (err) {
     console.error("GET /moments error:", err);
     res.status(500).json({ success: false, message: "خطأ في جلب اللحظات" });
@@ -125,6 +133,8 @@ router.post("/moments", auth, uploadFields, async (req, res) => {
       likedBy: [],
     });
 
+    momentsCache = { data: null, ts: 0 };
+
     res.json({
       success: true,
       moment: {
@@ -172,6 +182,8 @@ router.delete("/moments/:id", auth, async (req, res) => {
     
     await Moment.findByIdAndDelete(req.params.id);
 
+    momentsCache = { data: null, ts: 0 };
+
     res.json({ success: true, message: "تم الحذف" });
   } catch (err) {
     console.error("DELETE /moments/:id error:", err);
@@ -206,6 +218,8 @@ router.post("/moments/:id/like", auth, async (req, res) => {
     moment.likedBy = likedBy;
     moment.likedByMeta = likedByMeta;
     await moment.save();
+
+    momentsCache = { data: null, ts: 0 };
 
     res.json({
       success: true,

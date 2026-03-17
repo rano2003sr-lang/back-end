@@ -206,11 +206,19 @@ router.post("/google-login", async (req, res) => {
 });
 
 /* ================== AUTH ME ================== */
+const authMeCache = new Map();
+const AUTH_ME_TTL = 2000;
 router.get("/auth/me", auth, async (req, res) => {
-  const user = await User.findOne({ userId: req.user.id }).select("-password -loginPin -loginPinExpiresAt");
+  const meId = req.user.id;
+  const cached = authMeCache.get(meId);
+  if (cached && Date.now() - cached.ts < AUTH_ME_TTL) {
+    return res.json(cached.data);
+  }
+  const user = await User.findOne({ userId: meId }).select("-password -loginPin -loginPinExpiresAt");
   if (!user) return res.status(404).json({ message: "المستخدم غير موجود" });
-
-  res.json({ success: true, user: toUserResponse(user) });
+  const payload = { success: true, user: toUserResponse(user) };
+  authMeCache.set(meId, { data: payload, ts: Date.now() });
+  res.json(payload);
 });
 
 /* ================== ONLINE STATUS (النقطة الخضراء) ================== */
@@ -316,6 +324,8 @@ router.put("/auth/profile", auth, async (req, res) => {
     setOnce(user.month, month ? String(month).trim() : "", (v) => { user.month = v; });
 
     await user.save();
+
+    authMeCache.delete(req.user.id);
 
     res.json({ success: true, user: toUserResponse(user) });
   } catch (error) {
