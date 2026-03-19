@@ -18,6 +18,16 @@ const ROOM_NAME = "group-chat-room";
 const slots = new Map(); // slotIndex -> { userId, name, profileImage, ... }
 const roomMembers = new Set(); // userId
 
+// حالة الموسيقى المشتركة — تُبث لجميع المستخدمين
+let musicState = {
+  url: null,
+  isPlaying: false,
+  playlist: [],
+  currentIndex: 0,
+  volume: 1,
+  updatedAt: 0,
+};
+
 const musicDir = path.join(__dirname, "../uploads/music");
 if (!fs.existsSync(musicDir)) fs.mkdirSync(musicDir, { recursive: true });
 const musicUpload = multer({
@@ -160,6 +170,51 @@ router.get("/group-chat/voice-token", auth, async (req, res) => {
   } catch (err) {
     console.error("group-chat voice-token error:", err);
     res.status(500).json({ success: false, message: "خطأ في الحصول على توكن الصوت" });
+  }
+});
+
+// GET /api/group-chat/music-state — جلب حالة الموسيقى (للجميع)
+router.get("/group-chat/music-state", auth, (req, res) => {
+  res.json({ success: true, ...musicState });
+});
+
+// POST /api/group-chat/music-control — تشغيل/إيقاف/التالي/السابق/الصوت
+router.post("/group-chat/music-control", auth, (req, res) => {
+  try {
+    const { action, url, volume } = req.body;
+    const base = getBaseUrl(req);
+
+    if (action === "play" && url) {
+      const fullUrl = url.startsWith("http") ? url : `${base}${url.startsWith("/") ? "" : "/"}${url}`;
+      if (!musicState.playlist.length) musicState.playlist = [fullUrl];
+      else if (!musicState.playlist.includes(fullUrl)) musicState.playlist.push(fullUrl);
+      musicState.currentIndex = musicState.playlist.indexOf(fullUrl);
+      musicState.url = fullUrl;
+      musicState.isPlaying = true;
+      musicState.updatedAt = Date.now();
+    } else if (action === "stop") {
+      musicState.isPlaying = false;
+      musicState.url = null;
+      musicState.updatedAt = Date.now();
+    } else if (action === "next" && musicState.playlist.length > 0) {
+      musicState.currentIndex = (musicState.currentIndex + 1) % musicState.playlist.length;
+      musicState.url = musicState.playlist[musicState.currentIndex];
+      musicState.isPlaying = true;
+      musicState.updatedAt = Date.now();
+    } else if (action === "prev" && musicState.playlist.length > 0) {
+      musicState.currentIndex = (musicState.currentIndex - 1 + musicState.playlist.length) % musicState.playlist.length;
+      musicState.url = musicState.playlist[musicState.currentIndex];
+      musicState.isPlaying = true;
+      musicState.updatedAt = Date.now();
+    } else if (action === "volume" && typeof volume === "number") {
+      musicState.volume = Math.max(0, Math.min(1, volume));
+      musicState.updatedAt = Date.now();
+    }
+
+    res.json({ success: true, ...musicState });
+  } catch (err) {
+    console.error("music-control error:", err);
+    res.status(500).json({ success: false });
   }
 });
 
